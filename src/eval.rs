@@ -1,11 +1,10 @@
 use std::rc::Rc;
 
-use self::Unlambda::*;
-
-pub type Unlambda = Rc<UnlambdaData>;
+#[derive(Debug)]
+pub struct Unlambda {inner: Rc<UnlambdaEnum>}
 
 #[derive(Debug)]
-pub enum UnlambdaData {
+pub enum UnlambdaEnum {
     Apply(Unlambda, Unlambda),
     K,
     S,
@@ -18,4 +17,10 @@ pub enum UnlambdaData {
     At,
     Query(char),
     Pipe,
+}
+
+impl Unlambda {
+    pub fn new(data: UnlambdaEnum) -> Unlambda {
+        Unlambda {inner: Rc::new(data)}
+    }
 }

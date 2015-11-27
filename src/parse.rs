@@ -1,10 +1,8 @@
 
 use std::char;
-//use std::io::ErrorKind::InvalidData;
 use std::io::{self, BufRead, BufReader, Read};
-use std::rc::Rc;
 
-use eval::{Unlambda, UnlambdaData};
+use eval::{Unlambda, UnlambdaEnum};
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -54,7 +52,7 @@ pub fn read_token<B: Read>(mut reader: B) -> Result<Token, ParseError> {
         if cur_char == '#' {
             let mut buf_reader = BufReader::new(reader);
             let mut comment = String::new(); // To be dropped later
-            buf_reader.read_line(&mut comment);
+            try!(buf_reader.read_line(&mut comment));
             reader = buf_reader.into_inner();
             continue;
         }
@@ -85,7 +83,7 @@ pub fn read_token<B: Read>(mut reader: B) -> Result<Token, ParseError> {
 
 enum TokenAsExpr {
     App,
-    Expr(UnlambdaData)
+    Expr(UnlambdaEnum)
 }
 
 macro_rules! mk_token_to_expr {
@@ -98,10 +96,10 @@ macro_rules! mk_token_to_expr {
         match token {
             Token::App => TokenAsExpr::App,
             $(
-            Token::$s => TokenAsExpr::Expr(UnlambdaData::$s),
+            Token::$s => TokenAsExpr::Expr(UnlambdaEnum::$s),
             )*
             $(
-            Token::$c(ch) => TokenAsExpr::Expr(UnlambdaData::$c(ch)),
+            Token::$c(ch) => TokenAsExpr::Expr(UnlambdaEnum::$c(ch)),
             )*
         }
     }
@@ -122,7 +120,7 @@ pub fn parse_expr<B:Read>(mut reader: B) -> Result<Unlambda, ParseError> {
         match token_to_expr(token) {
             TokenAsExpr::App => {parse_stack.push(ParseCtx::AppFn);},
             TokenAsExpr::Expr(x) => {
-                let mut arg = Rc::new(x);
+                let mut arg = Unlambda::new(x);
                 loop {
                     match parse_stack.pop() {
                         None => {return Ok(arg);},
@@ -131,7 +129,7 @@ pub fn parse_expr<B:Read>(mut reader: B) -> Result<Unlambda, ParseError> {
                             break;
                         }
                         Some(ParseCtx::AppArg(func)) => {
-                            arg = Rc::new(UnlambdaData::Apply(func, arg));
+                            arg = Unlambda::new(UnlambdaEnum::Apply(func, arg));
                         }
                     }
                 }
