@@ -39,14 +39,6 @@ fn test_all_bytes_valid() {
     }
 }
 
-mod a {
-    pub enum Enum{Instance}
-}
-
-fn test_enum() -> a::Enum {
-    a::Enum::Instance
-}
-
 // Public for temporary test.
 #[derive(Debug)]
 pub enum Token {App, K, S, I, V, C, Dot(char), E, At, Query(char), Pipe}
@@ -69,18 +61,6 @@ pub fn read_token<B: Read>(mut reader: B) -> Result<Token, ParseError> {
         break;
     }
 
-    /*
-    macro_rules! token {
-        ($t:ident) => {return Ok(Token::$t)},
-    }
-    */
-    // An attempt at something more clever.
-    /*
-    macro_rules! token_test {
-        ($s:pat, $t:ident, $arr:tt) => $s $arr {return Ok(Token::$t)},
-        ($s:pat, $t:ident) => token_test!($s, $t, $arr),
-    }
-    */
     match cur_char {
         '`' => Ok(App),
         'k' => Ok(K),
