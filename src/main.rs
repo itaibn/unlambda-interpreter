@@ -5,5 +5,5 @@ use std::io;
 
 fn main() {
     let stdin = io::stdin();
-    println!("{:?}", parse_expr(stdin));
+    println!("{:?}", parse_expr(stdin).unwrap().eval());
 }

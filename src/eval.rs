@@ -37,13 +37,19 @@ impl Unlambda {
         &*self.inner
     }
 */
+    fn is_d(&self) -> bool {
+        match *self.inner {
+            D => true,
+            _ => false,
+        }
+    }
 }
 
 macro_rules! mk_expr {
     ([$e:expr]) => ($e);
+    (($($x:tt)*)) => (mk_expr! ($($x)*));
     ($t:ident) => (Unlambda::new($t));
-    ($t:ident; $($e:tt),*) => (Unlambda::new($t($(mk_expr! ($e))),*));
-    (($x:tt)) => mk_expr! $(x)
+    ($t:ident: $($e:tt),*) => (Unlambda::new($t($(mk_expr! ($e)),*)));
 }
 
 impl Deref for Unlambda {
@@ -55,7 +61,7 @@ impl Deref for Unlambda {
 }
 
 #[derive(Clone, Debug)]
-pub struct Continuation {inner: Rc<Option<ContStruct>>}
+pub struct Continuation {inner: Option<Rc<ContStruct>>}
 
 #[derive(Clone, Debug)]
 struct ContStruct {
@@ -74,38 +80,43 @@ use self::ContPart::*;
 
 impl Continuation {
     pub fn new() -> Continuation {
-        Continuation {inner: Rc::new(None)}
+        Continuation {inner: None}
     }
 
     fn add_part(&self, part: ContPart) -> Continuation {
         Continuation {
-            inner: Rc::new(ContStruct {
+            inner: Some(Rc::new(ContStruct {
                 part: part,
                 next: self.clone(),
-            })
+            }))
         }
     }
 
     fn eval(&self, expr: Unlambda) -> Result<Task, Unlambda> {
-        match expr {
-            Apply(func, arg) => Task::Eval(func, self.add_part(AppOn(arg))),
-            _ => self.throw(expr),
+        if let Apply(ref func, ref arg) = *expr.inner {
+            return Ok(Task::Eval(func.clone(),
+                                 self.add_part(AppOn(arg.clone()))));
         }
+        self.throw(expr)
     }
 
     fn throw(&self, obj: Unlambda) -> Result<Task, Unlambda> {
-        let stct = *self.unwrap_or_else(|| {return Err(obj);});
-        Ok(
-            match stct.part {
-                AppOn(arg) => match obj {
-                    D => Task::Eval(D1(obj), stct.next),
-                    _ => Task::Eval(arg, stct.next.add_part(ArgOf(obj))),
-                },
-                ArgOf(func) => Task::Apply(func, obj, stct.next),
+        match self.inner {
+            None => {return Err(obj);},
+            Some(ref stct) => Ok(
+                match stct.part {
+                    AppOn(ref arg) => if obj.is_d() {
+                        Task::Eval(Unlambda::new(D1(obj)), stct.next.clone())
+                    } else {
+                        Task::Eval(arg.clone(), stct.next.add_part(ArgOf(obj)))
+                    },
+                    ArgOf(ref func) => Task::Apply(func.clone(), obj,
+                        stct.next.clone()),
 //                ArgOfUnevaled(expr) => Task::Eval(expr,
 //                    stct.next.add_part(AppOn(
-            }
-        )
+                }
+            )
+        }
     }
 }
 
@@ -118,7 +129,10 @@ impl Task {
     pub fn main_loop(self) -> Unlambda {
         let mut task = self;
         loop {
-            task = task.single_step().unwrap_or_else(|unl| {return unl;})
+            match task.single_step() {
+                Ok(more) => {task = more;},
+                Err(result) => {return result;},
+            }
         }
     }
 
@@ -136,19 +150,28 @@ impl Unlambda {
         macro_rules! result {($($x:tt)*) => {cont.throw(mk_expr! ($($x)*))}}
 
         match *self.inner {
-            K => cont.throw(mk_expr! (K1; [arg])),
-            K1(c) => cont.throw(c),
-            S => result! (S1; [arg]),
-            S1(x) => result! (S2; [x], [arg]),
-            S2(x, y) => result! (Apply(Apply([x], [arg]), Apply([y], [arg]))),
+            Apply(_, _) => unreachable!(),
+            K => cont.throw(mk_expr! (K1: [arg])),
+            K1(ref c) => cont.throw(c.clone()),
+            S => result! (S1: [arg]),
+            S1(ref x) => result! (S2: [x.clone()], [arg]),
+            S2(ref x, ref y) => result! (Apply: (Apply: [x.clone()],
+                [arg.clone()]), (Apply: [y.clone()], [arg])),
             I => cont.throw(arg),
             V => result! (V),
-            C => result! (Apply([arg], Cont([cont.clone()]))),
-            Cont(alt_cont) => alt_cont.throw(arg),
+            C => result! (Apply: [arg], (Cont: [cont.clone()])),
+            Cont(ref alt_cont) => alt_cont.clone().throw(arg),
             D => panic!("Internal error: d applied on evaluated expression."),
-            D1(expr) => cont.add_part(ContPart::ArgOn(arg)).eval(expr),
+            D1(ref expr) =>
+                cont.add_part(ContPart::AppOn(arg)).eval(expr.clone()),
             E => Err(arg),
             Dot(_) | At | Query(_) | Pipe => panic!("IO not yet implemented"),
+            //_ => unimplemented!(),
         }
+    }
+
+    pub fn eval(self) -> Unlambda {
+        Continuation::new().eval(self).map(|t| t.main_loop()).unwrap_or_else(|u|
+            u)
     }
 }

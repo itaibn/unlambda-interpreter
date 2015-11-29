@@ -2,3 +2,6 @@
 
 pub mod eval;
 pub mod parse;
+
+#[cfg(test)]
+mod test_macro;
