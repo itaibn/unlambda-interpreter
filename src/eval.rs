@@ -1,7 +1,21 @@
+use std::io;
 use std::ops::Deref;
 use std::rc::Rc;
 
+//#[cfg(not(test))]
+//use parse;
+/*
+#[cfg(test)]
+mod parser {
+    use std::io;
+    fn read_one_char<B: io::Read>(b: B) -> io::Result<char> {
+        unimplemented!()
+    }
+}
+*/
+
 use self::UnlambdaEnum::*;
+use self::ContPart::*;
 
 #[derive(Clone, Debug)]
 pub struct Unlambda {inner: Rc<UnlambdaEnum>}
@@ -76,8 +90,6 @@ enum ContPart {
 //    ArgOfUnevaled(Unlambda),
 }
 
-use self::ContPart::*;
-
 impl Continuation {
     pub fn new() -> Continuation {
         Continuation {inner: None}
@@ -120,33 +132,46 @@ impl Continuation {
     }
 }
 
-pub enum Task {
+#[derive(Debug)]
+enum Task {
     Eval(Unlambda, Continuation),
     Apply(Unlambda, Unlambda, Continuation),
 }
 
+struct UnlambdaState<I:io::Read, O:io::Write> {
+    input: I,
+    output: O,
+    cur_char: Option<char>,
+    //task: Task,
+}
+
 impl Task {
-    pub fn main_loop(self) -> Unlambda {
+    pub fn main_loop<I:io::Read, O:io::Write>(self, state: &mut UnlambdaState<I,
+            O>) -> Unlambda {
         let mut task = self;
         loop {
-            match task.single_step() {
+            // Print step for debuggin
+            //println!("{:?}", task);
+            match task.single_step(state) {
                 Ok(more) => {task = more;},
                 Err(result) => {return result;},
             }
         }
     }
 
-    fn single_step(self) -> Result<Task, Unlambda> {
+    fn single_step<I:io::Read, O:io::Write>(self, state: &mut UnlambdaState<I,
+            O>) -> Result<Task, Unlambda> {
         match self {
             Task::Eval(expr, cont) => cont.eval(expr),
-            Task::Apply(func, arg, cont) => func.apply(arg, cont),
+            Task::Apply(func, arg, cont) => func.apply(arg, cont, state),
         }
     }
 }
 
 impl Unlambda {
-    fn apply(self, arg: Unlambda, cont: Continuation) -> Result<Task, Unlambda>
-    {
+    fn apply<I:io::Read, O:io::Write>(self, arg: Unlambda, cont: Continuation,
+            state: &mut UnlambdaState<I,O>) -> Result<Task, Unlambda> {
+        use parse;
         macro_rules! result {($($x:tt)*) => {cont.throw(mk_expr! ($($x)*))}}
 
         match *self.inner {
@@ -155,23 +180,51 @@ impl Unlambda {
             K1(ref c) => cont.throw(c.clone()),
             S => result! (S1: [arg]),
             S1(ref x) => result! (S2: [x.clone()], [arg]),
-            S2(ref x, ref y) => result! (Apply: (Apply: [x.clone()],
-                [arg.clone()]), (Apply: [y.clone()], [arg])),
+            S2(ref x, ref y) => cont.eval(mk_expr! (Apply: (Apply: [x.clone()],
+                [arg.clone()]), (Apply: [y.clone()], [arg]))),
             I => cont.throw(arg),
             V => result! (V),
             C => result! (Apply: [arg], (Cont: [cont.clone()])),
             Cont(ref alt_cont) => alt_cont.clone().throw(arg),
+            Dot(c) => {
+                write!(state.output, "{}", c);
+                cont.throw(arg)
+            }
             D => panic!("Internal error: d applied on evaluated expression."),
             D1(ref expr) =>
                 cont.add_part(ContPart::AppOn(arg)).eval(expr.clone()),
             E => Err(arg),
-            Dot(_) | At | Query(_) | Pipe => panic!("IO not yet implemented"),
-            //_ => unimplemented!(),
+            At =>
+                match parse::read_one_char(&mut state.input) {
+                    Ok(c) => {
+                        state.cur_char = Some(c);
+                        result! (Apply: [arg], I)
+                    },
+                    Err(_) => {
+                        state.cur_char = None;
+                        result! (Apply: [arg], V)
+                    },
+            },
+            Query(c) => {
+                if state.cur_char == Some(c) {
+                    result! (Apply: [arg], I)
+                } else {
+                    result! (Apply: [arg], V)
+                }
+            },
+            Pipe => cont.throw(Unlambda::new(Apply(arg,
+                Unlambda::new(state.cur_char.map_or(V, Dot))))),
         }
     }
 
-    pub fn eval(self) -> Unlambda {
-        Continuation::new().eval(self).map(|t| t.main_loop()).unwrap_or_else(|u|
-            u)
+    pub fn eval<I:io::Read, O:io::Write>(self, input: I, output: O) -> Unlambda
+    {
+        let mut state = UnlambdaState {
+            input: input,
+            output: output,
+            cur_char: None,
+        };
+        Continuation::new().eval(self).map(|t| t.main_loop(&mut
+            state)).unwrap_or_else(|u| u)
     }
 }

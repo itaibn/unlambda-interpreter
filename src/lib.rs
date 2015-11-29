@@ -1,7 +1,9 @@
 //! An Unlambda 2.0 interpreter written in Rust.
 
-pub mod eval;
+//extern crate unlambda_interpreter;
+
 pub mod parse;
+pub mod eval;
 
 #[cfg(test)]
 mod test_macro;
