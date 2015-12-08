@@ -118,7 +118,8 @@ impl Continuation {
             Some(ref stct) => Ok(
                 match stct.part {
                     AppOn(ref arg) => if obj.is_d() {
-                        Task::Eval(Unlambda::new(D1(obj)), stct.next.clone())
+                        Task::Eval(Unlambda::new(D1(arg.clone())),
+                            stct.next.clone())
                     } else {
                         Task::Eval(arg.clone(), stct.next.add_part(ArgOf(obj)))
                     },
@@ -176,7 +177,7 @@ impl Unlambda {
 
         match *self.inner {
             Apply(_, _) => unreachable!(),
-            K => cont.throw(mk_expr! (K1: [arg])),
+            K => result! (K1: [arg]),
             K1(ref c) => cont.throw(c.clone()),
             S => result! (S1: [arg]),
             S1(ref x) => result! (S2: [x.clone()], [arg]),
@@ -184,7 +185,7 @@ impl Unlambda {
                 [arg.clone()]), (Apply: [y.clone()], [arg]))),
             I => cont.throw(arg),
             V => result! (V),
-            C => result! (Apply: [arg], (Cont: [cont.clone()])),
+            C => {cont.eval(mk_expr! (Apply: [arg], (Cont: [cont.clone()])))},
             Cont(ref alt_cont) => alt_cont.clone().throw(arg),
             Dot(c) => {
                 write!(state.output, "{}", c);
@@ -198,18 +199,18 @@ impl Unlambda {
                 match parse::read_one_char(&mut state.input) {
                     Ok(c) => {
                         state.cur_char = Some(c);
-                        result! (Apply: [arg], I)
+                        cont.eval(mk_expr! (Apply: [arg], I))
                     },
                     Err(_) => {
                         state.cur_char = None;
-                        result! (Apply: [arg], V)
+                        cont.eval(mk_expr! (Apply: [arg], V))
                     },
             },
             Query(c) => {
                 if state.cur_char == Some(c) {
-                    result! (Apply: [arg], I)
+                    cont.eval(mk_expr! (Apply: [arg], I))
                 } else {
-                    result! (Apply: [arg], V)
+                    cont.eval(mk_expr! (Apply: [arg], V))
                 }
             },
             Pipe => cont.throw(Unlambda::new(Apply(arg,
