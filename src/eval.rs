@@ -59,13 +59,6 @@ impl Unlambda {
     }
 }
 
-macro_rules! mk_expr {
-    ([$e:expr]) => ($e);
-    (($($x:tt)*)) => (mk_expr! ($($x)*));
-    ($t:ident) => (Unlambda::new($t));
-    ($t:ident: $($e:tt),*) => (Unlambda::new($t($(mk_expr! ($e)),*)));
-}
-
 impl Deref for Unlambda {
     type Target = UnlambdaEnum;
 
@@ -173,19 +166,19 @@ impl Unlambda {
     fn apply<I:io::Read, O:io::Write>(self, arg: Unlambda, cont: Continuation,
             state: &mut UnlambdaState<I,O>) -> Result<Task, Unlambda> {
         use parse;
-        macro_rules! result {($($x:tt)*) => {cont.throw(mk_expr! ($($x)*))}}
 
         match *self.inner {
             Apply(_, _) => unreachable!(),
-            K => result! (K1: [arg]),
+            K => cont.throw(Unlambda::new(K1(arg))),
             K1(ref c) => cont.throw(c.clone()),
-            S => result! (S1: [arg]),
-            S1(ref x) => result! (S2: [x.clone()], [arg]),
-            S2(ref x, ref y) => cont.eval(mk_expr! (Apply: (Apply: [x.clone()],
-                [arg.clone()]), (Apply: [y.clone()], [arg]))),
+            S => cont.throw(Unlambda::new(S1(arg))),
+            S1(ref x) => cont.throw(Unlambda::new(S2(x.clone(), arg))),
+            S2(ref x, ref y) => Ok(Task::Apply(x.clone(), arg.clone(),
+                cont.add_part(AppOn(Unlambda::new(Apply(y.clone(),
+                        arg.clone())))))),
             I => cont.throw(arg),
-            V => result! (V),
-            C => {cont.eval(mk_expr! (Apply: [arg], (Cont: [cont.clone()])))},
+            V => cont.throw(Unlambda::new(V)),
+            C => Ok(Task::Apply(arg, Unlambda::new(Cont(cont.clone())), cont)),
             Cont(ref alt_cont) => alt_cont.clone().throw(arg),
             Dot(c) => {
                 write!(state.output, "{}", c);
@@ -199,22 +192,23 @@ impl Unlambda {
                 match parse::read_one_char(&mut state.input) {
                     Ok(c) => {
                         state.cur_char = Some(c);
-                        cont.eval(mk_expr! (Apply: [arg], I))
+                        Ok(Task::Apply(arg, Unlambda::new(I), cont))
                     },
                     Err(_) => {
                         state.cur_char = None;
-                        cont.eval(mk_expr! (Apply: [arg], V))
+                        Ok(Task::Apply(arg, Unlambda::new(V), cont))
                     },
             },
             Query(c) => {
                 if state.cur_char == Some(c) {
-                    cont.eval(mk_expr! (Apply: [arg], I))
+                    Ok(Task::Apply(arg, Unlambda::new(I), cont))
                 } else {
-                    cont.eval(mk_expr! (Apply: [arg], V))
+                    Ok(Task::Apply(arg, Unlambda::new(V), cont))
                 }
             },
-            Pipe => cont.throw(Unlambda::new(Apply(arg,
-                Unlambda::new(state.cur_char.map_or(V, Dot))))),
+            Pipe => Ok(Task::Apply(arg,
+                                   Unlambda::new(state.cur_char.map_or(V, Dot)),
+                                   cont)),
         }
     }
 
