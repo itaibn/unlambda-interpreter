@@ -39,17 +39,15 @@ pub fn read_one_char<B: Read>(mut reader: B) -> io::Result<char> {
 #[cfg(test)]
 #[test]
 fn test_all_bytes_valid() {
-    for b in 0..255 {
+    for b in 0..256 {
         assert!(char::from_u32(b).is_some());
     }
 }
 
-// Public for temporary test.
 #[derive(Debug)]
-pub enum Token {App, K, S, I, V, C, D, Dot(char), R, E, At, Query(char), Pipe}
+enum Token {App, K, S, I, V, C, D, Dot(char), R, E, At, Query(char), Pipe}
 
-// Public for temporary test.
-pub fn read_token<B: Read>(mut reader: B) -> Result<Token, ParseError> {
+fn read_token<B: Read>(mut reader: B) -> Result<Token, ParseError> {
     use self::Token::*;
 
     let mut cur_char: char;

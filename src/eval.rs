@@ -2,18 +2,6 @@ use std::io;
 use std::ops::Deref;
 use std::rc::Rc;
 
-//#[cfg(not(test))]
-//use parse;
-/*
-#[cfg(test)]
-mod parser {
-    use std::io;
-    fn read_one_char<B: io::Read>(b: B) -> io::Result<char> {
-        unimplemented!()
-    }
-}
-*/
-
 use self::UnlambdaEnum::*;
 use self::ContPart::*;
 
@@ -114,8 +102,6 @@ impl Continuation {
                 ArgOf(ref func) => Ok(Task::Apply(func.clone(), obj,
                     stct.next.clone())),
                 AppOnExpr(ref arg) => if obj.is_d() {
-                    //Task::Eval(Unlambda::new(D1(arg.clone())),
-                    //    stct.next.clone())
                     stct.next.throw(Unlambda::new(D1Expr(arg.clone())))
                 } else {
                     Ok(Task::Eval(arg.clone(), stct.next.add_part(ArgOf(obj))))
