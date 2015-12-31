@@ -33,7 +33,8 @@ pub enum UnlambdaEnum {
     C,
     Cont(Continuation),
     D,
-    D1(Unlambda),
+    D1Expr(Unlambda),
+    D1Apply(Unlambda, Unlambda),
     Dot(char),
     E,
     At,
@@ -78,9 +79,10 @@ struct ContStruct {
 
 #[derive(Clone, Debug)]
 enum ContPart {
-    AppOn(Unlambda),
     ArgOf(Unlambda),
-//    ArgOfUnevaled(Unlambda),
+    AppOnExpr(Unlambda),
+    AppOnVal(Unlambda),
+    AppOnApply(Unlambda, Unlambda),
 }
 
 impl Continuation {
@@ -100,7 +102,7 @@ impl Continuation {
     fn eval(&self, expr: Unlambda) -> Result<Task, Unlambda> {
         if let Apply(ref func, ref arg) = *expr.inner {
             return Ok(Task::Eval(func.clone(),
-                                 self.add_part(AppOn(arg.clone()))));
+                                 self.add_part(AppOnExpr(arg.clone()))));
         }
         self.throw(expr)
     }
@@ -108,20 +110,38 @@ impl Continuation {
     fn throw(&self, obj: Unlambda) -> Result<Task, Unlambda> {
         match self.inner {
             None => {return Err(obj);},
-            Some(ref stct) => Ok(
-                match stct.part {
-                    AppOn(ref arg) => if obj.is_d() {
-                        Task::Eval(Unlambda::new(D1(arg.clone())),
-                            stct.next.clone())
-                    } else {
-                        Task::Eval(arg.clone(), stct.next.add_part(ArgOf(obj)))
-                    },
-                    ArgOf(ref func) => Task::Apply(func.clone(), obj,
-                        stct.next.clone()),
-//                ArgOfUnevaled(expr) => Task::Eval(expr,
-//                    stct.next.add_part(AppOn(
+            Some(ref stct) => match stct.part {
+                ArgOf(ref func) => Ok(Task::Apply(func.clone(), obj,
+                    stct.next.clone())),
+                AppOnExpr(ref arg) => if obj.is_d() {
+                    //Task::Eval(Unlambda::new(D1(arg.clone())),
+                    //    stct.next.clone())
+                    stct.next.throw(Unlambda::new(D1Expr(arg.clone())))
+                } else {
+                    Ok(Task::Eval(arg.clone(), stct.next.add_part(ArgOf(obj))))
+                },
+                AppOnVal(ref arg) => if obj.is_d() {
+                    // Since arg is already evaluated `d{arg} behaves in exactly
+                    // the same way as arg itself. It possible to remove this
+                    // branch and handle this case in `apply` by making d behave
+                    // like i in an application, but I want to preserve the
+                    // invariant that d is never applied on anything.
+                    //
+                    // This can lead to a UI problem when the interpreter also
+                    // displays the result of the computation; for instance,
+                    // ``ddk will confusingly output K.
+                    stct.next.throw(arg.clone())
+                } else {
+                    Ok(Task::Apply(obj, arg.clone(), stct.next.clone()))
+                },
+                AppOnApply(ref func, ref arg) => if obj.is_d() {
+                    stct.next.throw(
+                        Unlambda::new(D1Apply(func.clone(), arg.clone())))
+                } else {
+                    Ok(Task::Apply(func.clone(), arg.clone(),
+                        stct.next.add_part(ArgOf(obj))))
                 }
-            )
+            }
         }
     }
 }
@@ -174,8 +194,7 @@ impl Unlambda {
             S => cont.throw(Unlambda::new(S1(arg))),
             S1(ref x) => cont.throw(Unlambda::new(S2(x.clone(), arg))),
             S2(ref x, ref y) => Ok(Task::Apply(x.clone(), arg.clone(),
-                cont.add_part(AppOn(Unlambda::new(Apply(y.clone(),
-                        arg.clone())))))),
+                cont.add_part(AppOnApply(y.clone(), arg.clone())))),
             I => cont.throw(arg),
             V => cont.throw(Unlambda::new(V)),
             C => Ok(Task::Apply(arg, Unlambda::new(Cont(cont.clone())), cont)),
@@ -185,8 +204,11 @@ impl Unlambda {
                 cont.throw(arg)
             }
             D => panic!("Internal error: d applied on evaluated expression."),
-            D1(ref expr) =>
-                cont.add_part(ContPart::AppOn(arg)).eval(expr.clone()),
+            D1Expr(ref expr) =>
+                cont.add_part(ContPart::AppOnVal(arg)).eval(expr.clone()),
+            D1Apply(ref func, ref x) =>
+                Ok(Task::Apply(func.clone(), x.clone(),
+                                cont.add_part(AppOnVal(arg)))),
             E => Err(arg),
             At =>
                 match parse::read_one_char(&mut state.input) {
