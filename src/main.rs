@@ -7,6 +7,7 @@ fn main() {
     let mut input = io::stdin();
     let output = io::stdout();
     let expr = parse_expr(&mut input).expect("Parsing error");
+    //println!("E {:?}", expr);
     println!("---\nResult: {:?}", expr.eval(input, output));
     //println!("{:?}", parse_expr(stdin).unwrap().eval());
 }
